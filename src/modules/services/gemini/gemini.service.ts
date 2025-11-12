@@ -1,3 +1,4 @@
+import { GoogleGenAI, Type } from '@google/genai';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
@@ -11,6 +12,7 @@ interface InvoiceData {
   invoiceDate?: string;
   dueDate?: string;
   orderDate?: string;
+  currency?: string; // ISO 4217 currency code (USD, EUR, VND, etc.)
 
   // Provider/Vendor information
   providerName?: string;
@@ -59,16 +61,108 @@ interface InvoiceData {
 
 @Injectable()
 export class GeminiService {
-  private apiKey: string;
+  private googleGenAi: GoogleGenAI;
   private model: string;
-  private apiUrl = 'https://generativelanguage.googleapis.com/v1beta/models';
 
   constructor(private configService: ConfigService) {
-    this.apiKey =
-      this.configService.get<string>('GEMINI_API_KEY') ||
-      'AIzaSyDDpq9FPauoiKC8AKG6frDYHO5RDyMIshY';
+    const apiKey =
+      this.configService.get<string>('GOOGLE_GENERATIVE_AI_API_KEY') || '';
+    this.googleGenAi = new GoogleGenAI({ apiKey });
     this.model =
-      this.configService.get<string>('GEMINI_MODEL') || 'gemini-2.0-flash-exp';
+      this.configService.get<string>('GEMINI_MODEL') || 'gemini-2.5-flash';
+  }
+
+  /**
+   * Generate invoice extraction prompt configuration with JSON schema
+   * @returns Configuration object with responseMimeType and responseSchema
+   */
+  private generateInvoicePromptConfig() {
+    return {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          documentInfo: {
+            type: Type.OBJECT,
+            properties: {
+              invoiceNumber: { type: Type.STRING, nullable: true },
+              invoiceDate: { type: Type.STRING, nullable: true },
+              dueDate: { type: Type.STRING, nullable: true },
+              orderDate: { type: Type.STRING, nullable: true },
+              currency: {
+                type: Type.STRING,
+                nullable: true,
+                description:
+                  'ISO 4217 currency code (e.g., USD, EUR, GBP, VND, JPY)',
+              },
+            },
+          },
+          providerInfo: {
+            type: Type.OBJECT,
+            properties: {
+              providerName: { type: Type.STRING, nullable: true },
+              providerAddress: { type: Type.STRING, nullable: true },
+              providerPhone: { type: Type.STRING, nullable: true },
+              providerEmail: { type: Type.STRING, nullable: true },
+              providerTaxId: { type: Type.STRING, nullable: true },
+            },
+          },
+          customerInfo: {
+            type: Type.OBJECT,
+            properties: {
+              customerName: { type: Type.STRING, nullable: true },
+              customerAddress: { type: Type.STRING, nullable: true },
+              customerPhone: { type: Type.STRING, nullable: true },
+              customerEmail: { type: Type.STRING, nullable: true },
+              customerTaxId: { type: Type.STRING, nullable: true },
+            },
+          },
+          items: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                itemNumber: { type: Type.STRING, nullable: true },
+                description: { type: Type.STRING },
+                quantity: { type: Type.NUMBER },
+                unitPrice: { type: Type.NUMBER },
+                discount: { type: Type.NUMBER, nullable: true },
+                tax: { type: Type.NUMBER, nullable: true },
+                total: { type: Type.NUMBER },
+              },
+              required: ['description', 'quantity', 'unitPrice', 'total'],
+            },
+          },
+          financialSummary: {
+            type: Type.OBJECT,
+            properties: {
+              subtotal: { type: Type.NUMBER, nullable: true },
+              discount: { type: Type.NUMBER, nullable: true },
+              taxRate: { type: Type.NUMBER, nullable: true },
+              taxAmount: { type: Type.NUMBER, nullable: true },
+              shippingCost: { type: Type.NUMBER, nullable: true },
+              total: { type: Type.NUMBER, nullable: true },
+            },
+          },
+          paymentInfo: {
+            type: Type.OBJECT,
+            properties: {
+              paymentMethod: { type: Type.STRING, nullable: true },
+              paymentStatus: { type: Type.STRING, nullable: true },
+              paymentTerms: { type: Type.STRING, nullable: true },
+            },
+          },
+          additionalInfo: {
+            type: Type.OBJECT,
+            properties: {
+              notes: { type: Type.STRING, nullable: true },
+              terms: { type: Type.STRING, nullable: true },
+            },
+          },
+        },
+        required: ['items'],
+      },
+    };
   }
 
   /**
@@ -83,133 +177,117 @@ export class GeminiService {
   ): Promise<InvoiceData> {
     console.log('gemini');
 
-    const prompt = `Analyze this invoice/receipt image and extract ALL relevant information in JSON format.
+    const prompt = `Analyze this invoice/receipt image and extract ALL relevant information.
+Extract all visible document information, provider/vendor details, customer/buyer details, line items, financial summary, payment information, and any additional notes or terms.
 
-Extract the following fields if available:
+IMPORTANT INSTRUCTIONS:
+1. CURRENCY: Detect the currency used in this invoice from currency symbols (€, $, £, ¥, ₫, etc.), currency codes (USD, EUR, VND, etc.), or country context. Return the ISO 4217 currency code (e.g., USD for US Dollar, EUR for Euro, VND for Vietnamese Dong, GBP for British Pound, JPY for Japanese Yen).
 
-DOCUMENT INFORMATION:
-- invoiceNumber: The invoice/receipt number
-- invoiceDate: The invoice/receipt date
-- dueDate: The payment due date
-- orderDate: The order creation date/time
+2. NUMBER FORMATTING:
+   - DO NOT round any numbers. Extract the EXACT values as shown in the invoice.
+   - Be aware that number formatting varies by locale:
+     * Some countries use periods (.) as thousands separators and commas (,) as decimal separators (e.g., 1.234,56 = one thousand two hundred thirty-four point fifty-six)
+     * Other countries use commas (,) as thousands separators and periods (.) as decimal separators (e.g., 1,234.56 = one thousand two hundred thirty-four point fifty-six)
+   - Always return numbers in standard decimal format (using period as decimal separator, no thousands separators)
+   - Examples:
+     * If you see "1.234,50" → return 1234.50
+     * If you see "1,234.50" → return 1234.50
+     * If you see "10.000" → return 10000 (if it's a thousands separator) OR 10.000 (if it's actually ten with three decimal places - use context)
+   - Preserve all decimal places exactly as shown in the invoice.
 
-PROVIDER/VENDOR INFORMATION:
-- providerName: The vendor/seller/company name
-- providerAddress: The vendor's full address
-- providerPhone: The vendor's phone number
-- providerEmail: The vendor's email address
-- providerTaxId: The vendor's tax ID or registration number
+3. TAX RATE:
+   - Return tax rate as a percentage NUMBER (not decimal).
+   - Examples:
+     * If you see "10% VAT" or "Tax: 10%" → return 10
+     * If you see "5% tax" → return 5
+     * If you see "0.08" or "8%" → return 8
+   - If the tax rate is shown as a decimal (e.g., 0.10), convert it to percentage (return 10).
 
-CUSTOMER/BUYER INFORMATION:
-- customerName: The customer/buyer name
-- customerAddress: The customer's full address
-- customerPhone: The customer's phone number
-- customerEmail: The customer's email address
-- customerTaxId: The customer's tax ID or registration number
+4. DATE FORMATTING:
+   - Be aware that date formats vary by country and region:
+     * US format: MM/DD/YYYY (e.g., 12/31/2024 = December 31, 2024)
+     * European/International format: DD/MM/YYYY (e.g., 31/12/2024 = December 31, 2024)
+     * ISO format: YYYY-MM-DD (e.g., 2024-12-31)
+     * Other formats: DD.MM.YYYY, DD-MM-YYYY, YYYY/MM/DD, etc.
+   - Use context clues (currency, language, company location, address) to determine the correct date format.
+   - Always return dates in ISO 8601 format: YYYY-MM-DD
+   - Examples:
+     * If invoice is in European currency and you see "15/03/2024" → return "2024-03-15" (March 15, 2024)
+     * If invoice is in USD and you see "03/15/2024" → return "2024-03-15" (March 15, 2024)
+     * If you see "31/12/2024" → return "2024-12-31" (this must be December 31st as there's no 31st month)
+   - Pay special attention to ambiguous dates like "05/06/2024" - use country context to determine if it's May 6th or June 5th.`;
 
-LINE ITEMS:
-- items: An array of line items, each containing:
-  - itemNumber: Item number or SKU
-  - description: Item description or name
-  - quantity: Quantity purchased
-  - unitPrice: Unit price per item
-  - discount: Discount applied (if any)
-  - tax: Tax amount for this item (if itemized)
-  - total: Total price for this line item
-
-FINANCIAL SUMMARY:
-- subtotal: Subtotal amount before tax and discounts
-- discount: Total discount amount
-- taxRate: Tax rate percentage
-- taxAmount: Total tax amount
-- shippingCost: Shipping or delivery cost
-- total: Final total amount
-
-PAYMENT INFORMATION:
-- paymentMethod: Payment method used (cash, card, etc.)
-- paymentStatus: Payment status (paid, pending, etc.)
-- paymentTerms: Payment terms or conditions
-
-ADDITIONAL INFORMATION:
-- notes: Any additional notes or comments
-- terms: Terms and conditions
-
-IMPORTANT:
-1. Return ONLY valid JSON without any markdown formatting, code blocks, or additional text
-2. Use null for fields that are not found in the image
-3. Ensure all numeric values are numbers, not strings
-4. Parse dates in ISO format if possible (YYYY-MM-DD)
-5. Be thorough and extract ALL visible information from the invoice`;
+    // Get JSON schema configuration
+    const schemaConfig = this.generateInvoicePromptConfig();
 
     try {
-      const response = await fetch(
-        `${this.apiUrl}/${this.model}:generateContent?key=${this.apiKey}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            contents: [
+      const result = await this.googleGenAi.models.generateContent({
+        model: this.model,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: prompt },
               {
-                parts: [
-                  {
-                    text: prompt,
-                  },
-                  {
-                    inline_data: {
-                      mime_type: mimeType,
-                      data: base64Image,
-                    },
-                  },
-                ],
+                inlineData: {
+                  mimeType: mimeType,
+                  data: base64Image,
+                },
               },
             ],
-            generationConfig: {
-              temperature: 0.1,
-              topK: 32,
-              topP: 1,
-              maxOutputTokens: 4096,
-            },
-          }),
+          },
+        ],
+        config: {
+          temperature: 0.1,
+          topK: 32,
+          topP: 1,
+          maxOutputTokens: 4096,
+          ...schemaConfig,
         },
-      );
+      });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
-      }
-
-      const data = await response.json();
-
-      if (!data.candidates || data.candidates.length === 0) {
+      if (!result || !result.candidates || result.candidates.length === 0) {
         throw new Error('No response from Gemini API');
       }
 
-      const textResponse = data.candidates[0].content.parts[0].text;
+      const textResponse = result.candidates[0]?.content?.parts?.[0]?.text;
 
-      // Remove markdown code blocks if present
-      const cleanedText = textResponse
-        .replace(/```json\n?/g, '')
-        .replace(/```\n?/g, '')
-        .trim();
+      if (!textResponse) {
+        throw new Error('No text response from Gemini API');
+      }
 
-      // Parse the JSON response
-      const invoiceData = JSON.parse(cleanedText);
+      // Parse the JSON response (with structured output, it should be valid JSON)
+      const invoiceData = JSON.parse(textResponse);
 
       // Extract token usage information from the response
-      const usageMetadata = data.usageMetadata || {};
+      const usageMetadata = result.usageMetadata || {};
       const tokenUsage = {
         inputTokens: usageMetadata.promptTokenCount || 0,
         outputTokens: usageMetadata.candidatesTokenCount || 0,
         totalTokens: usageMetadata.totalTokenCount || 0,
       };
 
-      // Return both invoice data and token usage
-      return {
-        ...invoiceData,
+      // Flatten the nested structure to match frontend expectations
+      const flattenedData = {
+        // Document info
+        ...invoiceData.documentInfo,
+        // Provider info
+        ...invoiceData.providerInfo,
+        // Customer info
+        ...invoiceData.customerInfo,
+        // Line items (keep as array)
+        items: invoiceData.items || [],
+        // Financial summary
+        ...invoiceData.financialSummary,
+        // Payment info
+        ...invoiceData.paymentInfo,
+        // Additional info
+        ...invoiceData.additionalInfo,
+        // Token usage
         _tokenUsage: tokenUsage,
       };
+
+      return flattenedData;
     } catch (error) {
       console.error('Error calling Gemini API:', error);
       throw new Error(`Failed to extract invoice data: ${error.message}`);

@@ -16,7 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { OcrService } from './ocr.service';
 
-@Controller('ocr')
+@Controller()
 export class OcrController {
   constructor(private readonly ocrService: OcrService) {}
 

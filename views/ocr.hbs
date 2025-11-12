@@ -72,6 +72,32 @@
             background: #f0f2ff;
         }
 
+        .image-preview {
+            margin: 15px 0;
+            display: none;
+        }
+
+        .image-preview.active {
+            display: block;
+        }
+
+        .preview-thumbnail {
+            max-width: 100%;
+            max-height: 500px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            border: 2px solid #667eea;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            object-fit: contain;
+            width: 100%;
+        }
+
+        .preview-thumbnail:hover {
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+            transform: scale(1.02);
+        }
+
         .file-input-wrapper {
             position: relative;
             display: inline-block;
@@ -225,7 +251,7 @@
         }
 
         .table-container {
-            overflow-x: auto;
+            overflow-x: hidden;
             margin-top: 20px;
             border-radius: 10px;
             box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
@@ -275,7 +301,7 @@
         }
 
         .numeric {
-            text-align: right;
+            text-align: left;
             font-weight: 500;
             color: #667eea;
         }
@@ -403,6 +429,58 @@
             padding: 12px;
             font-size: 15px;
         }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.77);
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            max-width: 95%;
+            max-height: 95%;
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 20px;
+            right: 40px;
+            color: #fff;
+            font-size: 48px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            z-index: 1001;
+            line-height: 1;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 50%;
+        }
+
+        .modal-close:hover {
+            background: rgba(102, 126, 234, 0.8);
+            transform: rotate(90deg);
+        }
     </style>
 </head>
 
@@ -423,14 +501,20 @@
                         </div>
                         <div class="file-name" id="fileName"></div>
 
+                        <!-- Image Preview -->
+                        <div class="image-preview" id="imagePreview">
+                            <img id="previewThumbnail" class="preview-thumbnail" alt="Invoice preview">
+                        </div>
+
                         <!-- Provider Selection -->
                         <div style="margin-top: 20px;">
-                            <label for="providerSelect" style="display: block; margin-bottom: 10px; color: #555; font-weight: 600; font-size: 0.9em;">
+                            <label for="providerSelect"
+                                style="display: block; margin-bottom: 10px; color: #555; font-weight: 600; font-size: 0.9em;">
                                 AI Provider:
                             </label>
                             <select id="providerSelect" name="provider" class="provider-select">
                                 <option value="gemini">Google Gemini</option>
-                                <option value="openai">OpenAI GPT-4</option>
+                                {{!-- <option value="openai">OpenAI GPT-4</option> --}}
                             </select>
                         </div>
 
@@ -439,11 +523,6 @@
                             Process Invoice
                         </button>
                     </form>
-                </div>
-
-                <div class="loading" id="loading">
-                    <div class="spinner"></div>
-                    <p style="margin-top: 15px; color: #667eea; font-weight: 600;">Processing invoice...</p>
                 </div>
 
                 <div id="errorMessage"></div>
@@ -474,11 +553,23 @@
 
             <!-- Right Column: Results Section -->
             <div class="right-column">
+                <div class="loading" id="loading">
+                    <div class="spinner"></div>
+                    <p style="margin-top: 15px; color: #667eea; font-weight: 600;">Processing invoice...</p>
+                </div>
+
+                <!-- Results -->
                 <div class="result-section" id="resultSection">
                     <div id="invoiceContent"></div>
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- Image Modal -->
+    <div id="imageModal" class="modal">
+        <span class="modal-close" id="modalClose">&times;</span>
+        <img class="modal-content" id="modalImage">
     </div>
 
     <script src="/js/ocr.js"></script>

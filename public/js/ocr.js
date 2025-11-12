@@ -6,11 +6,36 @@ const resultSection = document.getElementById('resultSection');
 const errorMessage = document.getElementById('errorMessage');
 const submitBtn = document.getElementById('submitBtn');
 
+// Modal elements
+const modal = document.getElementById('imageModal');
+const modalImage = document.getElementById('modalImage');
+const modalClose = document.getElementById('modalClose');
+const previewThumbnail = document.getElementById('previewThumbnail');
+
+// Global variable to store the detected currency
+let detectedCurrency = 'USD'; // Default fallback
+
 fileInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (file) {
         fileName.textContent = `Selected: ${file.name}`;
         submitBtn.style.display = 'inline-block';
+
+        // Show image preview
+        const imagePreview = document.getElementById('imagePreview');
+        const previewThumbnail = document.getElementById('previewThumbnail');
+
+        if (file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                previewThumbnail.src = event.target.result;
+                imagePreview.classList.add('active');
+            };
+            reader.readAsDataURL(file);
+        } else {
+            // Hide preview for non-image files (PDFs)
+            imagePreview.classList.remove('active');
+        }
     }
 });
 
@@ -40,7 +65,7 @@ uploadForm.addEventListener('submit', async (e) => {
     }
 
     try {
-        const response = await fetch(`/api/ocr/upload?provider=${provider}`, {
+        const response = await fetch(`/upload?provider=${provider}`, {
             method: 'POST',
             body: formData
         });
@@ -95,6 +120,10 @@ function displayResults(data) {
     const normalizedData = normalizeInvoiceData(data);
     console.log('Normalized data:', normalizedData);
 
+    // Set the detected currency from the data (default to USD if not provided)
+    detectedCurrency = normalizedData.currency || 'USD';
+    console.log('Detected currency:', detectedCurrency);
+
     // Create organized sections
     let html = '';
     console.log('Building HTML sections...');
@@ -104,7 +133,7 @@ function displayResults(data) {
     data = normalizedData;
 
     // Document Information Section
-    if (data.invoiceNumber || data.invoiceDate || data.dueDate || data.orderDate) {
+    if (data.invoiceNumber || data.invoiceDate || data.dueDate || data.orderDate || data.currency) {
         html += '<div class="info-section">';
         html += '<h2 class="section-title">📋 Document Information</h2>';
         html += '<div class="info-card">';
@@ -112,6 +141,7 @@ function displayResults(data) {
         if (data.invoiceDate) html += createInfoRow('Invoice Date', formatDate(data.invoiceDate));
         if (data.orderDate) html += createInfoRow('Order Date', formatDate(data.orderDate));
         if (data.dueDate) html += createInfoRow('Due Date', formatDate(data.dueDate));
+        if (data.currency) html += createInfoRow('Currency', data.currency);
         html += '</div></div>';
     }
 
@@ -246,10 +276,40 @@ function formatValue(value, header) {
 
 function formatCurrency(value) {
     if (typeof value === 'number') {
-        return new Intl.NumberFormat('en-US', {
-            style: 'currency',
-            currency: 'USD'
-        }).format(value);
+        // Map currency codes to appropriate locales for better formatting
+        const currencyLocaleMap = {
+            'USD': 'en-US',
+            'EUR': 'de-DE',
+            'GBP': 'en-GB',
+            'JPY': 'ja-JP',
+            'CNY': 'zh-CN',
+            'VND': 'vi-VN',
+            'KRW': 'ko-KR',
+            'THB': 'th-TH',
+            'SGD': 'en-SG',
+            'AUD': 'en-AU',
+            'CAD': 'en-CA',
+            'INR': 'en-IN',
+            'MYR': 'ms-MY',
+            'PHP': 'en-PH',
+            'IDR': 'id-ID'
+        };
+
+        const locale = currencyLocaleMap[detectedCurrency] || 'en-US';
+
+        try {
+            return new Intl.NumberFormat(locale, {
+                style: 'currency',
+                currency: detectedCurrency
+            }).format(value);
+        } catch (error) {
+            // Fallback to USD if currency code is invalid
+            console.warn(`Invalid currency code: ${detectedCurrency}, falling back to USD`);
+            return new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD'
+            }).format(value);
+        }
     }
     return value;
 }
@@ -282,28 +342,63 @@ function formatPaymentStatus(status) {
 }
 
 function normalizeInvoiceData(data) {
-    // Handle uppercase keys from Gemini API response
-    const normalized = {};
+    // The new Gemini structured output already returns flattened camelCase data
+    // We just need to ensure compatibility with old format if needed
+    console.log('Normalizing invoice data...');
+    console.log('Input data keys:', Object.keys(data));
 
-    // Map uppercase keys to camelCase
+    // Check if data is already in the new flat format (has items array at top level)
+    if (data.items && Array.isArray(data.items)) {
+        console.log('Data is in new flat format, items count:', data.items.length);
+        return data;
+    }
+
+    // Legacy format handling - uppercase keys with nested structure
+    const normalized = {};
     const keyMap = {
         'DOCUMENT_INFORMATION': 'documentInfo',
+        'DOCUMENT INFORMATION': 'documentInfo',
         'PROVIDER_VENDOR_INFORMATION': 'providerInfo',
+        'PROVIDER/VENDOR_INFORMATION': 'providerInfo',
+        'PROVIDER/VENDOR INFORMATION': 'providerInfo',
         'CUSTOMER_BUYER_INFORMATION': 'customerInfo',
+        'CUSTOMER/BUYER_INFORMATION': 'customerInfo',
+        'CUSTOMER/BUYER INFORMATION': 'customerInfo',
         'LINE_ITEMS': 'items',
+        'LINE ITEMS': 'items',
         'FINANCIAL_SUMMARY': 'financialSummary',
+        'FINANCIAL SUMMARY': 'financialSummary',
         'PAYMENT_INFORMATION': 'paymentInfo',
-        'ADDITIONAL_INFORMATION': 'additionalInfo'
+        'PAYMENT INFORMATION': 'paymentInfo',
+        'ADDITIONAL_INFORMATION': 'additionalInfo',
+        'ADDITIONAL INFORMATION': 'additionalInfo'
     };
 
-    // First, check if data has uppercase keys
+    // Check if data has any uppercase keys (old Gemini format)
+    const hasUppercaseKeys = Object.keys(data).some(key => keyMap[key]);
+
+    if (!hasUppercaseKeys) {
+        // Data is already in camelCase format, return as-is
+        console.log('Data already in camelCase format');
+        return data;
+    }
+
+    // Handle old uppercase format
+    console.log('Converting old uppercase format to flat format');
     Object.keys(data).forEach(key => {
         if (keyMap[key]) {
             const section = data[key];
 
-            // Special handling for LINE_ITEMS - keep as 'items' array
-            if (key === 'LINE_ITEMS') {
-                normalized['items'] = Array.isArray(section) ? section : [];
+            // Special handling for LINE_ITEMS or LINE ITEMS (with space)
+            if (key === 'LINE_ITEMS' || key === 'LINE ITEMS') {
+                // Check if section is an array directly or has nested 'items' property
+                if (Array.isArray(section)) {
+                    normalized['items'] = section;
+                } else if (section && section.items && Array.isArray(section.items)) {
+                    normalized['items'] = section.items;
+                } else {
+                    normalized['items'] = [];
+                }
                 console.log('LINE_ITEMS found, items count:', normalized['items'].length);
             } else if (section && typeof section === 'object' && !Array.isArray(section)) {
                 // Flatten nested objects into main data
@@ -311,13 +406,13 @@ function normalizeInvoiceData(data) {
                     normalized[innerKey] = section[innerKey];
                 });
             }
-        } else {
-            // Keep original key if not in map
+        } else if (key.startsWith('_')) {
+            // Preserve internal keys like _tokenUsage, _provider
             normalized[key] = data[key];
         }
     });
 
-    console.log('Normalization complete:', normalized);
+    console.log('Normalization complete');
     console.log('Items in normalized data:', normalized.items);
     return normalized;
 }
@@ -341,3 +436,35 @@ function displayTokenUsage(tokenUsage, provider) {
         tokenUsageSection.style.display = 'block';
     }
 }
+
+// Modal functionality
+// Open modal when clicking the preview thumbnail
+previewThumbnail.addEventListener('click', function() {
+    if (this.src) {
+        modalImage.src = this.src;
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden'; // Prevent background scrolling
+    }
+});
+
+// Close modal when clicking the X button
+modalClose.addEventListener('click', function() {
+    modal.classList.remove('active');
+    document.body.style.overflow = 'auto'; // Restore scrolling
+});
+
+// Close modal when clicking outside the image
+modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+        modal.classList.remove('active');
+        document.body.style.overflow = 'auto'; // Restore scrolling
+    }
+});
+
+// Close modal with Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && modal.classList.contains('active')) {
+        modal.classList.remove('active');
+        document.body.style.overflow = 'auto'; // Restore scrolling
+    }
+});

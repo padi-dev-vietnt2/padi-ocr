@@ -39,11 +39,6 @@ async function bootstrap() {
   const logger = WinstonModule.createLogger(loggerOptions);
   app.useLogger(logger);
 
-  const globalPrefix = 'api';
-  app.setGlobalPrefix(globalPrefix, {
-    exclude: ['graphiql', 'graphql'],
-  });
-
   const dir = publicPath();
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -62,8 +57,6 @@ async function bootstrap() {
 
   const port = AppConfig.port;
   await app.listen(port);
-  Logger.log(
-    `🚀 Application is running on: http://localhost:${port}/${globalPrefix}`,
-  );
+  Logger.log(`🚀 Application is running on: http://localhost:${port}/`);
 }
 bootstrap();
