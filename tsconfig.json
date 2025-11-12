@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2023",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strictNullChecks": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    "noFallthroughCasesInSwitch": false,
+    "paths": {
+      "@libs/logger": ["libs/logger/src"],
+      "@libs/logger/*": ["libs/logger/src/*"],
+      "@libs/modules": ["libs/modules/src"],
+      "@libs/modules/*": ["libs/modules/src/*"],
+      "@libs/utils": ["libs/utils/src"],
+      "@libs/utils/*": ["libs/utils/src/*"]
+    }
+  }
+}
