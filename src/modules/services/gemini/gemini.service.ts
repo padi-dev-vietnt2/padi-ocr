@@ -122,7 +122,6 @@ export class GeminiService {
             items: {
               type: Type.OBJECT,
               properties: {
-                itemNumber: { type: Type.STRING, nullable: true },
                 description: { type: Type.STRING },
                 quantity: { type: Type.NUMBER },
                 unitPrice: { type: Type.NUMBER },
@@ -192,6 +191,7 @@ IMPORTANT INSTRUCTIONS:
    - Examples:
      * If you see "1.234,50" → return 1234.50
      * If you see "1,234.50" → return 1234.50
+     * If you see only 123,456 -> return 123.456.
      * If you see "10.000" → return 10000 (if it's a thousands separator) OR 10.000 (if it's actually ten with three decimal places - use context)
    - Preserve all decimal places exactly as shown in the invoice.
 

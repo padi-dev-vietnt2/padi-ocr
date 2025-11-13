@@ -183,15 +183,44 @@ function displayResults(data) {
         html += '<div class="table-container">';
         html += '<table><thead><tr>';
 
-        const headers = Object.keys(data.items[0]);
-        headers.forEach(header => {
+        const allHeaders = Object.keys(data.items[0]);
+
+        // Check which columns have any non-null/non-empty values
+        let visibleHeaders = allHeaders.filter(header => {
+            const lowerHeader = header.toLowerCase();
+            const isTaxColumn = lowerHeader.includes('tax');
+
+            if (!isTaxColumn) {
+                return true; // Show all non-tax columns
+            }
+
+            // For tax columns, check if any item has a value
+            return data.items.some(item => {
+                const value = item[header];
+                return value !== null && value !== undefined && value !== '' && value !== 0;
+            });
+        });
+
+        // Remove existing item number column if present
+        const itemNumberIndex = visibleHeaders.findIndex(header =>
+            header.toLowerCase().includes('item') && header.toLowerCase().includes('number')
+        );
+        if (itemNumberIndex >= 0) {
+            visibleHeaders.splice(itemNumberIndex, 1);
+        }
+
+        // Add auto-generated item number header at the first position
+        html += '<th>No.</th>';
+        visibleHeaders.forEach(header => {
             html += `<th>${formatHeader(header)}</th>`;
         });
         html += '</tr></thead><tbody>';
 
-        data.items.forEach(item => {
+        data.items.forEach((item, index) => {
             html += '<tr>';
-            headers.forEach(header => {
+            // Add auto-generated item number
+            html += `<td class="numeric">${index + 1}</td>`;
+            visibleHeaders.forEach(header => {
                 const value = item[header];
                 const isNumeric = typeof value === 'number' || header.includes('Price') || header.includes('Total') || header.includes('quantity');
                 html += `<td class="${isNumeric ? 'numeric' : ''}">${formatValue(value, header)}</td>`;
@@ -267,7 +296,7 @@ function formatValue(value, header) {
     if (value === null || value === undefined) return '-';
 
     const lowerHeader = header.toLowerCase();
-    if (lowerHeader.includes('price') || lowerHeader.includes('total') || lowerHeader.includes('discount')) {
+    if (lowerHeader.includes('price') || lowerHeader.includes('total') || lowerHeader.includes('discount') || lowerHeader.includes('tax')) {
         return formatCurrency(value);
     }
 
